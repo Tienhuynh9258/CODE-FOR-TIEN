@@ -213,11 +213,10 @@ select * from book_transaction b
 where date(PURCHASED_DATE)=dateneed and (TRANS_STATUS='ERROR' OR not isnull(RESPONSE_DATE));
 end //
 delimiter ;
-call viewErrorTransactionDay('2021-3-1');
+-- call viewErrorTransactionDay('2021-3-1');
 -- i.14 Xem danh sách kho hàng có số sách tính theo mỗi ISBN dưới N quyển.
 drop procedure if exists viewWHhaveISBNlessthanN;
 DELIMITER //
-DROP PROCEDURE IF EXISTS viewWHhaveISBNlessthanN//
 CREATE PROCEDURE viewWHhaveISBNlessthanN(ISBN CHAR(13), N INT)
 BEGIN
 	SELECT warehouse.WNAME
@@ -233,8 +232,8 @@ delimiter //
 create procedure  WHExportMost(from_time date, next_time date)
 begin
 DECLARE MAX_SUM_EX INT DEFAULT 0;
-    
-	CREATE temporary TABLE TEMP
+    DROP TABLE IF EXISTS TEMP;
+	CREATE TABLE TEMP
 	select W.WNAME AS WHNAME, sum(EX_QTY) AS SUM_EX
 	FROM warehouse W, checks C
 	WHERE C.DATE_IM_EX >= from_time AND C.DATE_IM_EX <= next_time AND W.WNAME = C.WNAME
@@ -385,39 +384,55 @@ END
 DELIMITER ;
 
 -- ii.9 Xem danh sách giao dịch mà mình đã thực hiện trong một tháng
-DROP PROCEDURE IF EXISTS DSSach_GiaoDichTrongThang;
 DELIMITER //
-Create PROCEDURE DSSach_GiaoDichTrongThang(id char(9),start_date datetime,end_date datetime) 
-BEGIN  
-   SELECT * FROM ( customer  join book_transaction on customer.id=book_transaction.CID )
-where book_transaction.PURCHASED_DATE>=start_date and book_transaction.PURCHASED_DATE<=end_date and customer.id=id;  
-END 
-//
+DROP PROCEDURE IF EXISTS transactions_in_month//
+
+CREATE PROCEDURE transactions_in_month(IN desired_month INT, IN desired_year INT, IN C_ID CHAR(9))
+BEGIN
+	IF (desired_month >= 1 AND desired_month <= 12) THEN 
+		SELECT 	*
+        FROM	BOOK_TRANSACTION
+        WHERE	MONTH(PURCHASED_DATE) = desired_month 
+				AND YEAR(PURCHASED_DATE) = desired_year 
+				AND CID = C_ID;
+	END IF;
+END//
 DELIMITER ;
 
 -- ii.10 Xem danh sách các giao dịch gặp sự cố mà mình đã thực hiện trong 1 tháng
-DROP PROCEDURE IF EXISTS DSSach_SuCoTrongThang;
 DELIMITER //
-Create PROCEDURE DSSach_SuCoTrongThang(id char(9), start_date datetime,end_date datetime) 
-BEGIN  
-   SELECT * FROM ( book_transaction )
-where book_transaction.PURCHASED_DATE>=start_date 
-and book_transaction.PURCHASED_DATE<=end_date 
-and ( trans_status="error" OR not isnull(RESPONSE_DATE)) and book_transaction.cid=id;  
-END 
-//
+DROP PROCEDURE IF EXISTS transactions_error_in_month//
+
+CREATE PROCEDURE transactions_error_in_month(IN desired_month INT, IN desired_year INT, IN C_ID CHAR(9))
+BEGIN
+	IF (desired_month >= 1 AND desired_month <= 12) THEN 
+		SELECT 	*
+        FROM 	BOOK_TRANSACTION
+        WHERE	MONTH(PURCHASED_DATE) = desired_month 
+				AND YEAR(PURCHASED_DATE) = desired_year 
+                AND CID = C_ID 
+                AND TRANS_STATUS = 'ERROR';
+	END IF;
+END//
 DELIMITER ;
 
 -- ii.11 Xem danh sách các giao dịch mà mình đã thực hiện nhưng chưa hoàn tất
-DROP PROCEDURE IF EXISTS DSSach_ChuaHoanThanh;
 DELIMITER //
-Create PROCEDURE DSSach_ChuaHoanThanh(id char(9)) 
-BEGIN  
-   SELECT * FROM (  book_transaction )
-   where book_transaction.cid=id and trans_status="waiting";  
-END 
-//
+DROP PROCEDURE IF EXISTS transactions_waiting_in_month//
+
+CREATE PROCEDURE transactions_waiting_in_month(IN desired_month INT, IN desired_year INT, IN C_ID CHAR(9))
+BEGIN
+	IF (desired_month >= 1 AND desired_month <= 12) THEN 
+		SELECT	*
+        FROM 	BOOK_TRANSACTION
+        WHERE 	MONTH(PURCHASED_DATE) = desired_month 
+				AND YEAR(PURCHASED_DATE) = desired_year 
+                AND TRANS_STATUS = 'WAITING';
+	END IF;
+END//
 DELIMITER ;
+
+DELIMITER //
 
 -- ii.12 xem danh sách tác giả của cùng 1 thể loại
 DROP PROCEDURE IF EXISTS DSSach_TacGiaCungTheLoai;
@@ -431,70 +446,57 @@ DELIMITER ;
 -- call DSSach_TacGiaCungTheLoai('CODE');
 
 -- ii.13 Xem danh sách tác giả của cùng một số từ khóa.
-DROP FUNCTION IF EXISTS SPLIT_STRING;
-
-DELIMITER $
-
-CREATE FUNCTION 
-   SPLIT_STRING ( s VARCHAR(1024) , del CHAR(1) , i INT)
-   RETURNS VARCHAR(1024)
-   DETERMINISTIC -- always returns same results for same input parameters
-    BEGIN
-
-        DECLARE n INT ;
-
-        -- get max number of items
-        SET n = LENGTH(s) - LENGTH(REPLACE(s, del, '')) + 1;
-
-        IF i > n THEN
-            RETURN NULL ;
-        ELSE
-            RETURN SUBSTRING_INDEX(SUBSTRING_INDEX(s, del, i) , del , -1 ) ;        
-        END IF;
-
-    END
-$
-DELIMITER ;
-drop table if exists DanhSachTacGia;
-create table DanhSachTacGia(
-ISBN char(13),Bfield varchar(50),id int(9),aname varchar(100),address varchar(100));
-DROP PROCEDURE IF EXISTS DSSach_TuKhoaTacGia;
 DELIMITER //
-Create PROCEDURE DSSach_TuKhoaTacGia(couter int,bfield varchar(50)) 
-BEGIN  
-	DECLARE i INT DEFAULT 1;
-WHILE i <= couter DO
-		insert into DanhSachTacgia(isbn,bfield,id,aname,address)
-		SELECT isbn,book_field.BFIELD,id,aname,address FROM ((book_field  join book using(ISBN)) join written_by using(ISBN) join author on written_by.AUTHOR_ID=author.id)
-		where book_field.bfield = (SELECT split_string(bfield,'_',i));
-		
-		 SET i = i + 1;
-    END WHILE;
-END 
-//
+
+DROP PROCEDURE IF EXISTS authors_by_keyword//
+
+CREATE PROCEDURE authors_by_keyword(IN words CHAR(50))
+BEGIN
+	SELECT	KEYWORD, ANAME
+    FROM	BOOK AS B, BOOK_KEYWORD AS BK, AUTHOR AS A
+    WHERE	BK.ISBN = B.ISBN 
+			AND B.AUTHOR_ID = A.ID
+    GROUP BY	BK.KEYWORD
+    HAVING BK.KEYWORD = words;
+END//
+
 DELIMITER ;
 
 -- ii.14 Xem tổng số sách theo từng thể loại mà mình đã mua trong một tháng.
-drop procedure if exists SumByField;
-delimiter //
-create procedure SumByField(id char(9),from_time date, next_time date)
-begin
-SELECT BFIELD, SUM(QTY) as SUM_QTY FROM(
-SELECT BFIELD, QTY FROM book_in_transaction JOIN book_field ON book_in_transaction.ISBN = book_field.ISBN WHERE CID = id AND PURCHASED_DATE >= from_time AND PURCHASED_DATE <= next_time AND TRANS_TYPE = 'BUY' GROUP BY(book_field.isbn))a
-GROUP BY bfield;
-end //
-delimiter ;
--- call SumByField('C00000001','2020-01-01','2030-05-24');
+DELIMITER //
+
+DROP PROCEDURE IF EXISTS bought_book_by_field//
+
+CREATE PROCEDURE bought_book_by_field(IN desired_month INT, IN desired_year INT, IN C_ID CHAR(9))
+BEGIN
+    SELECT	BFIELD, SUM(QTY)
+    FROM	BOOK_TRANSACTION, BOOK_FIELD, BOOK_IN_TRANSACTION
+    WHERE	MONTH(PURCHASED_DATE) = desired_month 
+			AND YEAR(PURCHASED_DATE) = desired_year 
+			AND STATUS = 'SUCCESS' 
+            AND CID = C_ID 
+            AND TRANS_TYPE = 'BUY'
+    GROUP BY BFIELD;
+END//
+
+DELIMITER ;
 
 -- ii.15 Xem các giao dịch mà mình đã thực hiện có số lượng sách được mua nhiều nhất trong một tháng.
-drop procedure if exists TransactionHaveMostBook;
-delimiter //
-create procedure TransactionHaveMostBook(id char(9),from_time date, next_time date)
-begin
-SELECT * FROM book_in_transaction WHERE QTY = (SELECT MAX(QTY) FROM book_in_transaction AS t WHERE t.PURCHASED_DATE >= from_time AND t.PURCHASED_DATE <= next_time AND t.CID = id) AND CID =id AND TRANS_TYPE = 'BUY';
-end //
-delimiter ;
+DELIMITER //
 
+DROP PROCEDURE IF EXISTS most_quantity_bought_book//
+
+CREATE PROCEDURE most_quantity_bought_book(IN desired_month INT, IN desired_year INT, IN C_ID CHAR(9))
+BEGIN
+	SELECT	TITLE, MAX(QTY)
+    FROM	BOOK_IN_TRANSACTION AS A, BOOK AS B
+    WHERE	MONTH(A.PURCHASED_DATE) = desired_month 
+			AND YEAR(A.PURCHASED_DATE) = desired_year 
+            AND A.ISBN = B.ISBN 
+            AND CID = C_ID;
+END//
+
+DELIMITER ;
 -- ii.16  Xem các giao dịch vừa có sách truyền thống vừa có sách điện tử được mua hoặc thuê mà mình đã thực hiện trong một tháng.
 drop procedure if exists viewTransactionhaveboth;
 delimiter //
@@ -581,7 +583,7 @@ GRANT SELECT ON ebook TO 'customer'@'localhost';
 GRANT SELECT ON traditional_book TO 'customer'@'localhost';
 GRANT SELECT ON stocked_in TO 'customer'@'localhost';
 GRANT SELECT ON address_method TO 'customer'@'localhost';
-GRANT SELECT ON credit_card TO 'customer'@'localhost';
+GRANT SELECT,UPDATE,INSERT ON credit_card TO 'customer'@'localhost';
 GRANT SELECT ON cod TO 'customer'@'localhost';
 GRANT SELECT ON shipping_method TO 'customer'@'localhost';
 GRANT SELECT ON work_for TO 'customer'@'localhost';
